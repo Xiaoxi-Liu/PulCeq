@@ -98,7 +98,7 @@ for p = 1:ceq.nParentBlocks
     dur = max(dur, round(ceil(b.blockDuration/raster)*raster*1e6)); % us
     dur = dur + sysGE.psd_rf_wait*hasRF(p);  % conservative/lazy choice for now
     fprintf(fid,'%s\t%d\t%d\t%d\t-1\n', ...
-        modFiles{p}, dur, hasRF(p), hasADC(p));    
+        modFiles{p}, round(dur), hasRF(p), hasADC(p));    
 end
 fclose(fid);
 
