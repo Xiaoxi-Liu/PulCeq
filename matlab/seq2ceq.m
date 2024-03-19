@@ -58,6 +58,8 @@ end
 
 parentBlockIndex(1) = 1;  % first block is unique by definition
 
+parentBlockIDs = [];
+
 fprintf('seq2ceq: Getting block %d/%d', 1, ceq.nMax); prev_n = 1; % Progress update trackers
 for n = 1:ceq.nMax
     if ~mod(n, 500) || n == ceq.nMax
@@ -73,6 +75,12 @@ for n = 1:ceq.nMax
     b = seq.getBlock(n);
     if isdelayblock(b)
         parentBlockIDs(n) = 0;
+        continue;
+    end
+
+    % Skip blocks containing only a label
+    if islabelblock(b)
+        parentBlockIDs(n) = -1;
         continue;
     end
 
@@ -105,7 +113,7 @@ for p = 1:length(parentBlockIndex)
     ceq.parentBlocks{p}.amp.gz = 0;
 
     for n = 1:ceq.nMax
-        if parentBlockIDs(n) ~= p
+        if parentBlockIDs(n) ~= p | parentBlockIDs(n) == -1
             continue; 
         end
         block = seq.getBlock(n);
@@ -148,30 +156,40 @@ end
 
 
 %% Get segment (block group) definitions
-% Segments defined by their first occurrence in the .seq file.
+% Segments are defined by their first occurrence in the .seq file
 previouslyDefinedSegmentIDs = [];
 if ~arg.ignoreSegmentLabels
     segmentIDs = zeros(1,ceq.nMax);  % keep track of which segment each block belongs to
     for n = 1:ceq.nMax
         b = seq.getBlock(n);
 
-        if isfield(b, 'label') 
-            if strcmp(b.label.label, 'TRID')   % marks start of segment
-                activeSegmentID = b.label.value;
+        if parentBlockIDs(n) == -1
+            continue;
+        end
 
-                if ~any(activeSegmentID == previouslyDefinedSegmentIDs)
-                    % start new segment
-                    firstOccurrence = true;
-                    previouslyDefinedSegmentIDs = [previouslyDefinedSegmentIDs activeSegmentID];
-                    Segments{activeSegmentID} = [];
-                else
-                    firstOccurrence = false;
+        % Get segment ID label (TRID)
+        if isfield(b, 'label') 
+            if length(b.label) == 1
+                if strcmp(b.label.label, 'TRID')   % marks start of segment
+                    activeSegmentID = b.label.value;
+
+                    if ~any(activeSegmentID == previouslyDefinedSegmentIDs)
+                        % start new segment
+                        if ~exist(firstSegmentRowIndex)
+                            firstSegmentRowIndex = n;
+                        end
+                        firstOccurrence = true;
+                        previouslyDefinedSegmentIDs = [previouslyDefinedSegmentIDs activeSegmentID];
+                        Segments{activeSegmentID} = [];
+                    else
+                        firstOccurrence = false;
+                    end
                 end
             end
         end
 
         if ~exist('firstOccurrence', 'var')
-            error('First block must contain a segment ID');
+            %error('First block must contain a segment ID');
         end
 
         % add block to segment
@@ -221,20 +239,23 @@ ceq.nGroups = length(ceq.groups);
 
 %% Get dynamic scan information
 ceq.loop = zeros(ceq.nMax, 10);
-for n = 1:ceq.nMax
+for n = firstSegmentRowIndex:ceq.nMax
     b = seq.getBlock(n);
     p = parentBlockIDs(n); 
     if p == 0  % delay block
         ceq.loop(n,:) = getdynamics(b, segmentID2Ind(segmentIDs(n)), p);
-    else
+    elseif p > 0
         ceq.loop(n,:) = getdynamics(b, segmentID2Ind(segmentIDs(n)), p, ceq.parentBlocks{p});
     end
 end
 
 %% Check that the execution of blocks throughout the sequence
 %% is consistent with the segment definitions
-n = 1;
+n = firstSegmentRowIndex;
 while n < ceq.nMax
+    if isempty(parentBlockIDs(n))
+        continue;
+    end
     i = ceq.loop(n, 1);  % segment id
     for j = 1:ceq.groups(i).nBlocksInGroup
         p = ceq.loop(n, 2);  % parent block id
