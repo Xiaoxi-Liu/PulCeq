@@ -277,5 +277,5 @@ while n < ceq.nMax
 end
 
 %% Remove zero-duration (label) blocks from ceq.loop
-ceq.loop(parentBlockIDS == -1, :) = [];
+ceq.loop(parentBlockIDs == -1, :) = [];
 ceq.nMax = size(ceq.loop,1);
