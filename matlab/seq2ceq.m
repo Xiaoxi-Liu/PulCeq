@@ -54,13 +54,13 @@ end
 % parent blocks = unique up to a scaling factor, or phase/frequency offsets.
 % Contains waveforms with maximum amplitude across blocks.
 % First find unique blocks, then determine and set max amplitudes.
-% parentBlockIDs = [1 nMax], vector of parent block IDs for all blocks
+% parentBlockIDs = [nMax], vector of parent block IDs for all blocks
 
 parentBlockIndex(1) = 1;  % first block is unique by definition
 
 parentBlockIDs = [];
 
-fprintf('seq2ceq: Getting block %d/%d', 1, ceq.nMax); prev_n = 1; % Progress update trackers
+fprintf('seq2ceq: Getting block %d/%d', 1, ceq.nMax); prev_n = 1;
 for n = 1:ceq.nMax
     if ~mod(n, 500) || n == ceq.nMax
         for ib = 1:strlength(sprintf('seq2ceq: Getting block %d/%d', prev_n, ceq.nMax))
@@ -71,16 +71,17 @@ for n = 1:ceq.nMax
         if n == ceq.nMax, fprintf('\n'), end
     end
 
-    % Pure delay blocks are handled separately
     b = seq.getBlock(n);
-    if isdelayblock(b)
-        parentBlockIDs(n) = 0;
+
+    % Skip blocks with zero duration (only contains label(s))
+    if b.blockDuration < 2*eps
+        parentBlockIDs(n) = -1;
         continue;
     end
 
-    % Skip blocks containing only a label
-    if islabelblock(b)
-        parentBlockIDs(n) = -1;
+    % Pure delay blocks are handled separately
+    if isdelayblock(b)
+        parentBlockIDs(n) = 0;
         continue;
     end
 
@@ -164,26 +165,28 @@ if ~arg.ignoreSegmentLabels
         b = seq.getBlock(n);
 
         if parentBlockIDs(n) == -1
-            continue;
+            continue;    % skip
         end
 
-        % Get segment ID label (TRID)
+        % Get segment ID label (TRID) if present
         if isfield(b, 'label') 
-            if length(b.label) == 1
-                if strcmp(b.label.label, 'TRID')   % marks start of segment
-                    activeSegmentID = b.label.value;
+            hasTRIDlabel = false;
+            for ii = 1:length(b.label)
+                if strcmp(b.label(ii).label, 'TRID')
+                    hasTRIDlabel = true;
+                    break;
+                end
+            end
+            if hasTRIDlabel  % marks start of segment
+                activeSegmentID = b.label(ii).value;
 
-                    if ~any(activeSegmentID == previouslyDefinedSegmentIDs)
-                        % start new segment
-                        if ~exist(firstSegmentRowIndex)
-                            firstSegmentRowIndex = n;
-                        end
-                        firstOccurrence = true;
-                        previouslyDefinedSegmentIDs = [previouslyDefinedSegmentIDs activeSegmentID];
-                        Segments{activeSegmentID} = [];
-                    else
-                        firstOccurrence = false;
-                    end
+                if ~any(activeSegmentID == previouslyDefinedSegmentIDs)
+                    % start new segment
+                    firstOccurrence = true;
+                    previouslyDefinedSegmentIDs = [previouslyDefinedSegmentIDs activeSegmentID];
+                    Segments{activeSegmentID} = [];
+                else
+                    firstOccurrence = false;
                 end
             end
         end
@@ -239,7 +242,7 @@ ceq.nGroups = length(ceq.groups);
 
 %% Get dynamic scan information
 ceq.loop = zeros(ceq.nMax, 10);
-for n = firstSegmentRowIndex:ceq.nMax
+for n = 1:ceq.nMax
     b = seq.getBlock(n);
     p = parentBlockIDs(n); 
     if p == 0  % delay block
@@ -251,12 +254,16 @@ end
 
 %% Check that the execution of blocks throughout the sequence
 %% is consistent with the segment definitions
-n = firstSegmentRowIndex;
+n = 1;
 while n < ceq.nMax
-    if isempty(parentBlockIDs(n))
+    if parentBlockIDs(n) == -1
+        n = n + 1;
         continue;
     end
     i = ceq.loop(n, 1);  % segment id
+    if (n + ceq.groups(i).nBlocksInGroup) > ceq.nMax
+        break;
+    end
     for j = 1:ceq.groups(i).nBlocksInGroup
         p = ceq.loop(n, 2);  % parent block id
         p_ij = ceq.groups(i).blockIDs(j);
@@ -269,9 +276,6 @@ while n < ceq.nMax
     end
 end
 
-%fprintf('\n');
-
-% function returns true if blocks are same except for zero-scaling of RF and/or gradients 
-function sub_compareblocks(b1, b2)
-
-return
+%% Remove zero-duration (label) blocks from ceq.loop
+ceq.loop(parentBlockIDS == -1, :) = [];
+ceq.nMax = size(ceq.loop,1);
